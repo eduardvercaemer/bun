@@ -239,7 +239,9 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
         pub usingnamespace bun.New(@This());
 
         const HTTPClient = @This();
-
+        fn isDeadPtr(ptr: *HTTPClient) bool {
+            return @intFromPtr(ptr) == 1;
+        }
         pub fn register(_: *JSC.JSGlobalObject, _: *anyopaque, ctx: *uws.SocketContext) callconv(.C) void {
             Socket.configure(
                 ctx,
@@ -363,7 +365,8 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
             this.cancel();
         }
 
-        pub fn handleClose(this: *HTTPClient, _: Socket, _: c_int, _: ?*anyopaque) void {
+        pub fn handleClose(this: *HTTPClient, socket: Socket, _: c_int, _: ?*anyopaque) void {
+            if (this.isDeadPtr()) return;
             log("onClose", .{});
             JSC.markBinding(@src());
             this.clearData();
@@ -376,6 +379,8 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
             }
 
             this.destroy();
+
+            socket.markDeadExtPtr();
         }
 
         pub fn terminate(this: *HTTPClient, code: ErrorCode) void {
@@ -385,6 +390,8 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
         }
 
         pub fn handleHandshake(this: *HTTPClient, socket: Socket, success: i32, ssl_error: uws.us_bun_verify_error_t) void {
+            if (this.isDeadPtr()) return;
+
             log("onHandshake({d})", .{success});
 
             const authorized = if (success == 1) true else false;
@@ -411,6 +418,7 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
         }
 
         pub fn handleOpen(this: *HTTPClient, socket: Socket) void {
+            if (this.isDeadPtr()) return;
             log("onOpen", .{});
             std.debug.assert(socket.socket == this.tcp.?.socket);
 
@@ -436,6 +444,7 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
         }
 
         pub fn handleData(this: *HTTPClient, socket: Socket, data: []const u8) void {
+            if (this.isDeadPtr()) return;
             log("onData", .{});
             if (this.outgoing_websocket == null) {
                 this.clearData();
@@ -482,6 +491,8 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
 
         pub fn handleEnd(this: *HTTPClient, socket: Socket) void {
             log("onEnd", .{});
+
+            if (this.isDeadPtr()) return;
             std.debug.assert(socket.socket == this.tcp.?.socket);
             this.terminate(ErrorCode.ended);
         }
@@ -604,6 +615,8 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
             this: *HTTPClient,
             socket: Socket,
         ) void {
+            if (this.isDeadPtr()) return;
+
             std.debug.assert(socket.socket == this.tcp.?.socket);
 
             if (this.to_send.len == 0)
@@ -621,12 +634,16 @@ pub fn NewHTTPUpgradeClient(comptime ssl: bool) type {
             this: *HTTPClient,
             _: Socket,
         ) void {
+            if (this.isDeadPtr()) return;
+
             this.terminate(ErrorCode.timeout);
         }
-        pub fn handleConnectError(this: *HTTPClient, _: Socket, _: c_int) void {
+        pub fn handleConnectError(this: *HTTPClient, socket: Socket, _: c_int) void {
+            if (this.isDeadPtr()) return;
             this.tcp = null;
             this.terminate(ErrorCode.failed_to_connect);
             this.destroy();
+            socket.markDeadExtPtr();
         }
 
         pub const Export = shim.exportFunctions(.{
@@ -954,7 +971,9 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
         const WebSocket = @This();
 
         pub usingnamespace bun.New(@This());
-
+        fn isDeadPtr(ptr: *WebSocket) bool {
+            return @intFromPtr(ptr) == 1;
+        }
         pub fn register(global: *JSC.JSGlobalObject, loop_: *anyopaque, ctx_: *anyopaque) callconv(.C) void {
             const vm = global.bunVM();
             const loop = @as(*uws.Loop, @ptrCast(@alignCast(loop_)));
@@ -985,6 +1004,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
         }
 
         pub fn clearData(this: *WebSocket) void {
+            log("clearData", .{});
             this.poll_ref.unref(this.globalThis.bunVM());
             this.clearReceiveBuffers(true);
             this.clearSendBuffers(true);
@@ -994,6 +1014,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
         }
 
         pub fn cancel(this: *WebSocket) callconv(.C) void {
+            log("cancel", .{});
             this.clearData();
 
             if (this.tcp.isClosed() or this.tcp.isShutdown())
@@ -1020,6 +1041,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
 
         pub fn handleHandshake(this: *WebSocket, socket: Socket, success: i32, ssl_error: uws.us_bun_verify_error_t) void {
             JSC.markBinding(@src());
+            if (this.isDeadPtr()) return;
             const authorized = if (success == 1) true else false;
 
             log("onHandshake({d})", .{success});
@@ -1046,7 +1068,9 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
                 }
             }
         }
-        pub fn handleClose(this: *WebSocket, _: Socket, _: c_int, _: ?*anyopaque) void {
+        pub fn handleClose(this: *WebSocket, socket: Socket, _: c_int, _: ?*anyopaque) void {
+            if (this.isDeadPtr()) return;
+
             log("onClose", .{});
             JSC.markBinding(@src());
             this.clearData();
@@ -1054,6 +1078,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
                 this.outgoing_websocket = null;
                 ws.didAbruptClose(ErrorCode.ended);
             }
+            socket.markDeadExtPtr();
         }
 
         pub fn terminate(this: *WebSocket, code: ErrorCode) void {
@@ -1156,6 +1181,8 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
         }
 
         pub fn handleData(this: *WebSocket, socket: Socket, data_: []const u8) void {
+            if (this.isDeadPtr()) return;
+
             // after receiving close we should ignore the data
             if (this.close_received) return;
 
@@ -1635,6 +1662,7 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
         }
 
         pub fn handleEnd(this: *WebSocket, socket: Socket) void {
+            if (this.isDeadPtr()) return;
             std.debug.assert(socket.socket == this.tcp.socket);
             this.terminate(ErrorCode.ended);
         }
@@ -1643,6 +1671,8 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
             this: *WebSocket,
             socket: Socket,
         ) void {
+            if (this.isDeadPtr()) return;
+            if (this.close_received) return;
             std.debug.assert(socket.socket == this.tcp.socket);
             const send_buf = this.send_buffer.readableSlice(0);
             if (send_buf.len == 0)
@@ -1653,10 +1683,13 @@ pub fn NewWebSocketClient(comptime ssl: bool) type {
             this: *WebSocket,
             _: Socket,
         ) void {
+            if (this.isDeadPtr()) return;
             this.terminate(ErrorCode.timeout);
         }
-        pub fn handleConnectError(this: *WebSocket, _: Socket, _: c_int) void {
+        pub fn handleConnectError(this: *WebSocket, socket: Socket, _: c_int) void {
+            if (this.isDeadPtr()) return;
             this.terminate(ErrorCode.failed_to_connect);
+            socket.markDeadExtPtr();
         }
 
         pub fn hasBackpressure(this: *const WebSocket) bool {
